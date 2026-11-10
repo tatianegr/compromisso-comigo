@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#f8f4ed">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Compromisso comigo</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f8f4ed;color:#253e35;font:16px system-ui,sans-serif}main{max-width:580px;margin:auto;padding:36px 18px}h1{font:2.5rem Georgia,serif;margin:8px 0}h2{font:1.55rem Georgia,serif;margin:0 0 12px}p{line-height:1.5}section{background:#fffdf9;border:1px solid #e5ded3;border-radius:20px;padding:20px;margin:16px 0}button,input{font:inherit;border:1px solid #577166;border-radius:10px;padding:10px;min-height:44px}button{background:#eaf0eb;color:#253e35;cursor:pointer}button.primary{background:#285546;color:white;width:100%}button:disabled{opacity:.6;cursor:default}label{display:block;margin:8px 0}form{margin-bottom:10px}ul,ol{padding-left:22px}li{margin:10px 0}li button{margin-left:8px}summary{cursor:pointer}small{letter-spacing:.12em}#status{min-height:1.5em}dialog{width:min(90%,420px);border:1px solid #577166;border-radius:16px;padding:20px;color:inherit}dialog::backdrop{background:#172d2580}
+</style>
+</head>
+<body>
+<main>
+<header><small>MEU CUIDADO DIÁRIO</small><h1>Compromisso comigo</h1><p>Um lugar pra registrar quando você tomou seu remédio.</p></header>
+<section><h2>Hoje</h2><p id="today"></p><button id="take" class="primary" type="button">Tomei</button><p id="status" role="status"></p></section>
+<section>
+<h2>Lembrete diário</h2>
+<form id="reminder"><label for="hour">Horário do lembrete</label><input id="hour" type="time" required> <button type="submit">Criar no iPhone</button></form>
+<details><summary>Configurar o atalho no iPhone</summary>
+<ol>
+<li>No app Atalhos, crie um atalho chamado <strong>Compromisso comigo</strong>.</li>
+<li>Adicione a ação <strong>Obter datas da entrada</strong> e selecione <strong>Entrada do Atalho</strong> como entrada.</li>
+<li>Adicione a ação <strong>Adicionar Novo Lembrete</strong>. Use <strong>Compromisso comigo</strong> como título, escolha sua lista e configure o aviso na data e hora recebidas da ação anterior.</li>
+<li>Volte aqui, escolha o horário e toque em <strong>Criar no iPhone</strong>. Autorize o acesso aos Lembretes se o iPhone pedir.</li>
+<li>Abra o lembrete criado e, nos detalhes, selecione <strong>Repetir → Diariamente</strong>. Pra trocar o horário depois, edite o lembrete existente no iPhone.</li>
+</ol>
+</details>
+</section>
+<section><h2>Histórico</h2><p id="empty">Nenhuma tomada registrada ainda.</p><ul id="history"></ul></section>
+<footer><p>O histórico fica salvo neste navegador.</p></footer>
+</main>
+<dialog id="edit">
+<form id="correction"><h2>Corrigir tomada</h2><label for="takenAt">Data e hora da tomada</label><input type="datetime-local" id="takenAt" required><p id="editError" role="status"></p><button type="submit">Salvar</button> <button id="cancel" type="button">Cancelar</button> <button id="remove" type="button">Excluir</button></form>
+</dialog>
+<script>
+const byId = id => document.getElementById(id);
+const key = 'compromisso-comigo:tomadas:v1';
+const formatter = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'medium', timeStyle: 'short' });
+const clock = new Intl.DateTimeFormat('pt-BR', { timeStyle: 'short' });
+const localDateTime = date => new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+const dayOf = date => localDateTime(date).slice(0, 10);
+let records = [];
+let editing;
+let available = true;
+
+try {
+  records = JSON.parse(localStorage.getItem(key) ?? '[]');
+  if (!Array.isArray(records) || records.some(record => !record || typeof record.id !== 'string' || !Number.isFinite(new Date(record.at).getTime()))) {
+    throw new Error('Histórico inválido');
+  }
+} catch {
+  records = [];
+  available = false;
+  byId('status').textContent = 'Não foi possível abrir o histórico neste navegador.';
+}
+
+function todayRecord() {
+  const today = dayOf(new Date());
+  return records.find(record => dayOf(new Date(record.at)) === today);
+}
+
+function render() {
+  const current = todayRecord();
+  byId('today').textContent = current ? 'Tomada registrada às ' + clock.format(new Date(current.at)) + '.' : 'Nenhuma tomada registrada hoje.';
+  byId('take').disabled = !available || Boolean(current);
+  byId('take').textContent = current ? 'Registrado hoje' : 'Tomei';
+  byId('empty').hidden = records.length > 0 || !available;
+  const entries = [...records].sort((a, b) => new Date(b.at) - new Date(a.at)).map(record => {
+    const item = document.createElement('li');
+    item.textContent = formatter.format(new Date(record.at)) + ' ';
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = 'Corrigir';
+    button.addEventListener('click', () => {
+      editing = record.id;
+      byId('takenAt').value = localDateTime(new Date(record.at));
+      byId('editError').textContent = '';
+      byId('edit').showModal();
+    });
+    item.append(button);
+    return item;
+  });
+  byId('history').replaceChildren(...entries);
+}
+
+function save(next, message, errorTarget = 'status') {
+  try {
+    localStorage.setItem(key, JSON.stringify(next));
+  } catch {
+    byId(errorTarget).textContent = 'Não foi possível salvar a alteração.';
+    return false;
+  }
+  records = next;
+  byId('status').textContent = message;
+  render();
+  return true;
+}
+
+byId('take').addEventListener('click', () => {
+  if (!available || todayRecord()) return;
+  save([...records, { id: globalThis.crypto?.randomUUID?.() ?? String(Date.now()), at: new Date().toISOString() }], 'Tomada salva.');
+});
+
+byId('correction').addEventListener('submit', event => {
+  event.preventDefault();
+  const date = new Date(byId('takenAt').value);
+  if (!Number.isFinite(date.getTime()) || date > new Date()) {
+    byId('editError').textContent = 'Informe uma data e hora que já passaram.';
+    return;
+  }
+  const next = records.map(record => record.id === editing ? { ...record, at: date.toISOString() } : record);
+  if (save(next, 'Registro corrigido.', 'editError')) byId('edit').close();
+});
+
+byId('cancel').addEventListener('click', () => byId('edit').close());
+byId('remove').addEventListener('click', () => {
+  if (confirm('Excluir esta tomada do histórico?') &&
+      save(records.filter(record => record.id !== editing), 'Registro excluído.', 'editError')) byId('edit').close();
+});
+
+byId('reminder').addEventListener('submit', event => {
+  event.preventDefault();
+  const [hours, minutes] = byId('hour').value.split(':').map(Number);
+  const now = new Date();
+  const next = new Date(now);
+  next.setHours(hours, minutes, 0, 0);
+  if (next <= now) {
+    next.setDate(next.getDate() + 1);
+    next.setHours(hours, minutes, 0, 0);
+  }
+  const input = new Intl.DateTimeFormat('pt-BR', {
+    day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit'
+  }).format(next);
+  location.href = 'shortcuts://run-shortcut?name=' + encodeURIComponent('Compromisso comigo') +
+    '&input=text&text=' + encodeURIComponent(input);
+});
+document.addEventListener('visibilitychange', () => { if (!document.hidden) render(); });
+setInterval(() => {
+  if (byId('take').disabled !== (!available || Boolean(todayRecord()))) render();
+}, 30000);
+render();
+</script>
+</body>
+</html>
